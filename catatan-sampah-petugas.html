@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Catatan Sampah Petugas</title>
+<link rel="icon" href="data:,">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; }
+  :root {
+    --bg: #F3F4EF;
+    --card: #FFFFFF;
+    --ink: #1C2621;
+    --ink-soft: #5B6660;
+    --line: #DDE1D6;
+    --organik: #3F7D4E;
+    --organik-bg: #E7F1E8;
+    --nonorganik: #2E6E8E;
+    --nonorganik-bg: #E4EEF3;
+    --residu: #B54A2A;
+    --residu-bg: #F5E7E0;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+  .disp { font-family: 'Space Grotesk', sans-serif; }
+  #app { max-width: 640px; margin: 0 auto; padding: 20px 16px 70px; min-height: 100vh; }
+  input, select, button { font-family: 'Inter', sans-serif; font-size: 15px; }
+  input, select {
+    border: 1.5px solid var(--line); background: #fff; border-radius: 10px;
+    padding: 11px 12px; color: var(--ink); width: 100%; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--ink); }
+  label { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); display: block; margin-bottom: 5px; }
+  button { cursor: pointer; border: none; font-weight: 600; }
+  .btn-primary { background: var(--ink); color: #fff; border-radius: 10px; padding: 13px 18px; font-size: 15px; width: 100%; }
+  .btn-primary:active { opacity: .85; }
+  .btn-secondary { background: #fff; color: var(--ink); border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-ghost { background: none; color: var(--ink-soft); font-size: 12.5px; text-decoration: underline; padding: 4px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1.5px solid var(--line); margin-bottom: 18px; }
+  .tab-btn { flex: none; padding: 10px 14px; background: none; color: var(--ink-soft); font-size: 13.5px; font-weight: 600; border-bottom: 2.5px solid transparent; border-radius: 0; }
+  .tab-btn.active { color: var(--ink); border-bottom-color: var(--ink); }
+  .stat-card { border-radius: 12px; padding: 13px 15px; border-left: 4px solid; background: #fff; border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+  table.report { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.report th { text-align: left; padding: 8px 8px; color: var(--ink-soft); font-weight: 600; border-bottom: 1.5px solid var(--line); white-space: nowrap; }
+  table.report td { padding: 8px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.report tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+  .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 10px; font-size: 13.5px; font-weight: 500; box-shadow: 0 6px 20px rgba(0,0,0,.18); opacity: 0; transition: opacity .2s ease; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--residu); }
+  .kg-input-group { display: flex; gap: 8px; align-items: center; }
+  .kg-input-group input { text-align: right; }
+  .kg-input-group span { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+  .print-only { display: none; }
+  .empty-note { font-size: 13.5px; color: var(--ink-soft); }
+  @media print {
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .card { border: none !important; padding: 0 !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast no-print"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var LS_ID = 'catatan_sampah_identitas';
+  var LS_ENTRIES = 'catatan_sampah_entries';
+
+  var BULAN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  var HARI = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function addDays(dateStr, n) {
+    var p = dateStr.split('-').map(Number);
+    var dt = new Date(p[0], p[1] - 1, p[2]);
+    dt.setDate(dt.getDate() + n);
+    return dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate());
+  }
+  function firstOfMonth() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-01';
+  }
+  function formatTanggal(str) {
+    var p = str.split('-');
+    return parseInt(p[2], 10) + ' ' + BULAN[parseInt(p[1], 10) - 1] + ' ' + p[0];
+  }
+  function formatTanggalPanjang(str) {
+    var p = str.split('-').map(Number);
+    var dt = new Date(p[0], p[1] - 1, p[2]);
+    return HARI[dt.getDay()] + ', ' + parseInt(p[2], 10) + ' ' + BULAN[p[1] - 1] + ' ' + p[0];
+  }
+  function fmtKg(n) {
+    return (Math.round((n + Number.EPSILON) * 1000) / 1000).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  var state = {
+    identitas: null,
+    entries: [],
+    tab: 'input',
+    editingId: null,
+    formTanggal: todayStr(),
+    formVals: { organikKg: '', organikG: '', nonKg: '', nonG: '', resKg: '', resG: '' },
+    rDari: todayStr(),
+    rSampai: todayStr()
+  };
+
+  function loadState() {
+    try {
+      var idRaw = localStorage.getItem(LS_ID);
+      state.identitas = idRaw ? JSON.parse(idRaw) : null;
+    } catch (e) { state.identitas = null; }
+    try {
+      var eRaw = localStorage.getItem(LS_ENTRIES);
+      state.entries = eRaw ? JSON.parse(eRaw) : [];
+    } catch (e) { state.entries = []; }
+  }
+  function saveIdentitas(obj) {
+    state.identitas = obj;
+    try { localStorage.setItem(LS_ID, JSON.stringify(obj)); }
+    catch (e) { showToast('Gagal menyimpan identitas di HP ini. Coba lagi.', 'error'); }
+  }
+  function saveEntries() {
+    try { localStorage.setItem(LS_ENTRIES, JSON.stringify(state.entries)); }
+    catch (e) { showToast('Gagal menyimpan data di HP ini. Coba lagi.', 'error'); }
+  }
+
+  var toastTimer = null;
+  function showToast(msg, type) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast no-print show' + (type === 'error' ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.className = 'toast no-print'; }, 2600);
+  }
+
+  // ---------- render: setup identitas ----------
+  function renderSetupIdentitas(prefill) {
+    prefill = prefill || { nama: '', rt: '', rw: '' };
+    var app = document.getElementById('app');
+    app.innerHTML =
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">' +
+        '<div style="width:40px;height:40px;border-radius:10px;background:var(--ink);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;">&#9878;</div>' +
+        '<div><div class="disp" style="font-size:20px;font-weight:700;line-height:1.1;">Catatan Sampah Petugas</div>' +
+        '<div style="font-size:12.5px;color:var(--ink-soft);">Isi identitas sekali, tersimpan di HP ini</div></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">Identitas Petugas</div>' +
+        '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:16px;">Data ini akan otomatis muncul setiap kali aplikasi dibuka di HP ini.</div>' +
+        '<div style="display:flex;flex-direction:column;gap:12px;">' +
+          '<div><label>Nama Petugas</label><input id="in-nama" placeholder="Contoh: Budi Santoso" value="' + esc(prefill.nama) + '"></div>' +
+          '<div class="row">' +
+            '<div><label>Nomor RT</label><input id="in-rt" placeholder="Contoh: 03" value="' + esc(prefill.rt) + '"></div>' +
+            '<div><label>Nomor RW</label><input id="in-rw" placeholder="Contoh: 05" value="' + esc(prefill.rw) + '"></div>' +
+          '</div>' +
+          '<button class="btn-primary" onclick="App.submitIdentitas()" style="margin-top:6px;">Simpan &amp; Mulai</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function submitIdentitas() {
+    var nama = document.getElementById('in-nama').value.trim();
+    var rt = document.getElementById('in-rt').value.trim();
+    var rw = document.getElementById('in-rw').value.trim();
+    if (!nama) { showToast('Nama petugas wajib diisi', 'error'); return; }
+    if (!rt) { showToast('Nomor RT wajib diisi', 'error'); return; }
+    if (!rw) { showToast('Nomor RW wajib diisi', 'error'); return; }
+    saveIdentitas({ nama: nama, rt: rt, rw: rw });
+    showToast('Identitas tersimpan');
+    render();
+  }
+
+  function editIdentitas() {
+    renderSetupIdentitas(state.identitas);
+  }
+
+  // ---------- helpers on entries ----------
+  function findEntryByDate(dateStr) {
+    for (var i = 0; i < state.entries.length; i++) {
+      if (state.entries[i].tanggal === dateStr) return state.entries[i];
+    }
+    return null;
+  }
+  function splitKgGram(total) {
+    var kg = Math.floor(total + 1e-9);
+    var g = Math.round((total - kg) * 1000);
+    if (g >= 1000) { kg += 1; g -= 1000; }
+    return { kg: kg, g: g };
+  }
+  function combineKgGram(kgStr, gStr) {
+    var kg = parseFloat(kgStr) || 0;
+    var g = parseFloat(gStr) || 0;
+    return kg + (g / 1000);
+  }
+
+  function loadFormForDate(dateStr) {
+    state.formTanggal = dateStr;
+    var existing = findEntryByDate(dateStr);
+    if (existing) {
+      var o = splitKgGram(existing.organik), n = splitKgGram(existing.nonOrganik), r = splitKgGram(existing.residu);
+      state.formVals = { organikKg: o.kg, organikG: o.g, nonKg: n.kg, nonG: n.g, resKg: r.kg, resG: r.g };
+      state.editingId = existing.id;
+    } else {
+      state.formVals = { organikKg: '', organikG: '', nonKg: '', nonG: '', resKg: '', resG: '' };
+      state.editingId = null;
+    }
+  }
+
+  function submitEntry() {
+    var organik = combineKgGram(document.getElementById('f-organik-kg').value, document.getElementById('f-organik-g').value);
+    var nonOrganik = combineKgGram(document.getElementById('f-non-kg').value, document.getElementById('f-non-g').value);
+    var residu = combineKgGram(document.getElementById('f-res-kg').value, document.getElementById('f-res-g').value);
+    if (organik < 0 || nonOrganik < 0 || residu < 0) { showToast('Jumlah tidak boleh negatif', 'error'); return; }
+    if (organik === 0 && nonOrganik === 0 && residu === 0) { showToast('Isi minimal satu jenis sampah', 'error'); return; }
+
+    if (state.editingId) {
+      state.entries = state.entries.map(function (e) {
+        if (e.id === state.editingId) return Object.assign({}, e, { organik: organik, nonOrganik: nonOrganik, residu: residu });
+        return e;
+      });
+    } else {
+      state.entries.push({
+        id: 'e-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+        tanggal: state.formTanggal, organik: organik, nonOrganik: nonOrganik, residu: residu
+      });
+    }
+    saveEntries();
+    showToast(state.editingId ? 'Data diperbarui' : 'Data tersimpan');
+    loadFormForDate(state.formTanggal);
+    render();
+  }
+
+  function editEntry(id) {
+    var e = null;
+    for (var i = 0; i < state.entries.length; i++) { if (state.entries[i].id === id) { e = state.entries[i]; break; } }
+    if (!e) return;
+    state.tab = 'input';
+    loadFormForDate(e.tanggal);
+    render();
+  }
+
+  function deleteEntry(id) {
+    if (!confirm('Hapus data ini secara permanen?')) return;
+    state.entries = state.entries.filter(function (e) { return e.id !== id; });
+    if (state.editingId === id) { state.editingId = null; }
+    saveEntries();
+    showToast('Data dihapus');
+    render();
+  }
+
+  function resetAllData() {
+    if (!confirm('Hapus SEMUA riwayat data di HP ini? Identitas petugas tidak akan terhapus.')) return;
+    if (!confirm('Yakin sekali? Semua riwayat pencatatan akan hilang permanen dari HP ini.')) return;
+    state.entries = [];
+    saveEntries();
+    loadFormForDate(todayStr());
+    showToast('Semua riwayat data dihapus');
+    render();
+  }
+
+  function changeFormDate(val) {
+    loadFormForDate(val);
+    render();
+  }
+
+  function setTab(t) { state.tab = t; render(); }
+
+  // ---------- report calc ----------
+  function totalsOf(list) {
+    return list.reduce(function (acc, e) {
+      acc.organik += e.organik; acc.nonOrganik += e.nonOrganik; acc.residu += e.residu;
+      return acc;
+    }, { organik: 0, nonOrganik: 0, residu: 0 });
+  }
+  function filteredEntries() {
+    return state.entries
+      .filter(function (e) { return e.tanggal >= state.rDari && e.tanggal <= state.rSampai; })
+      .slice()
+      .sort(function (a, b) { return b.tanggal.localeCompare(a.tanggal); });
+  }
+  function earliestDate() {
+    if (state.entries.length === 0) return todayStr();
+    return state.entries.reduce(function (min, e) { return e.tanggal < min ? e.tanggal : min; }, state.entries[0].tanggal);
+  }
+
+  // ---------- export ----------
+  function exportExcel() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk diekspor', 'error'); return; }
+    var t = totalsOf(list);
+    var idt = state.identitas;
+    var rows = [
+      ['LAPORAN PENDATAAN SAMPAH'],
+      ['Petugas', idt.nama],
+      ['RT / RW', idt.rt + ' / ' + idt.rw],
+      ['Periode', formatTanggal(state.rDari) + ' s/d ' + formatTanggal(state.rSampai)],
+      [],
+      ['Tanggal', 'Organik (kg)', 'Non-Organik (kg)', 'Residu (kg)', 'Total (kg)'],
+    ];
+    list.slice().sort(function (a, b) { return a.tanggal.localeCompare(b.tanggal); }).forEach(function (e) {
+      rows.push([formatTanggal(e.tanggal), +e.organik.toFixed(3), +e.nonOrganik.toFixed(3), +e.residu.toFixed(3), +(e.organik + e.nonOrganik + e.residu).toFixed(3)]);
+    });
+    rows.push([]);
+    rows.push(['', 'TOTAL', +t.organik.toFixed(3), '', '']);
+    rows.push(['', '', +t.nonOrganik.toFixed(3), '', '']);
+    var grand = t.organik + t.nonOrganik + t.residu;
+    rows.push(['TOTAL KESELURUHAN', +t.organik.toFixed(3), +t.nonOrganik.toFixed(3), +t.residu.toFixed(3), +grand.toFixed(3)]);
+
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Laporan Sampah');
+    XLSX.writeFile(wb, 'laporan-sampah_' + idt.nama.replace(/\s+/g, '-') + '_' + state.rDari + '_sd_' + state.rSampai + '.xlsx');
+    showToast('File Excel diunduh');
+  }
+
+  function exportPDF() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk dicetak', 'error'); return; }
+    window.print();
+  }
+
+  // ---------- main render ----------
+  function render() {
+    if (!state.identitas) { renderSetupIdentitas(); return; }
+
+    if (!state.editingId && !document.getElementById('f-organik-kg')) {
+      loadFormForDate(state.formTanggal);
+    }
+
+    var idt = state.identitas;
+    var todayEntries = state.entries.filter(function (e) { return e.tanggal === todayStr(); });
+    var todayTotals = totalsOf(todayEntries);
+    var todayGrand = todayTotals.organik + todayTotals.nonOrganik + todayTotals.residu;
+
+    var app = document.getElementById('app');
+    var html = '';
+
+    // header
+    html += '<div class="no-print" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;">' +
+      '<div style="display:flex;align-items:center;gap:12px;">' +
+        '<div style="width:40px;height:40px;border-radius:10px;background:var(--ink);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;flex-shrink:0;">&#9878;</div>' +
+        '<div><div class="disp" style="font-size:19px;font-weight:700;line-height:1.15;">Catatan Sampah Petugas</div>' +
+        '<div style="font-size:12px;color:var(--ink-soft);">' + esc(idt.nama) + ' &middot; RT ' + esc(idt.rt) + ' / RW ' + esc(idt.rw) + '</div></div>' +
+      '</div>' +
+      '<button class="btn-ghost" onclick="App.editIdentitas()">Edit</button>' +
+    '</div>';
+    html += '<div class="no-print" style="font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;">' + formatTanggalPanjang(todayStr()) + '</div>';
+    html += '<div class="no-print" style="font-size:11px;color:var(--ink-soft);margin-bottom:18px;">Data tersimpan hanya di HP ini. Gunakan menu Laporan untuk mengekspor dan mengirim data ke pusat.</div>';
+
+    html += '<div class="print-only" style="margin-bottom:16px;">' +
+      '<div class="disp" style="font-size:19px;font-weight:700;">Laporan Pendataan Sampah</div>' +
+      '<div style="font-size:13px;color:#5B6660;">Petugas: ' + esc(idt.nama) + ' &middot; RT ' + esc(idt.rt) + ' / RW ' + esc(idt.rw) + '</div>' +
+      '<div style="font-size:13px;color:#5B6660;">Periode ' + formatTanggal(state.rDari) + ' &mdash; ' + formatTanggal(state.rSampai) + '</div>' +
+    '</div>';
+
+    // tabs
+    html += '<div class="tabs no-print">' +
+      '<button class="tab-btn ' + (state.tab === 'input' ? 'active' : '') + '" onclick="App.setTab(\'input\')">Input Data</button>' +
+      '<button class="tab-btn ' + (state.tab === 'laporan' ? 'active' : '') + '" onclick="App.setTab(\'laporan\')">Laporan</button>' +
+    '</div>';
+
+    if (state.tab === 'input') {
+      html += '<div class="no-print">';
+      html += '<div class="card">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:12px;">RINGKASAN HARI INI</div>' +
+        '<div class="stat-grid" style="margin-bottom:12px;">' +
+          statCard('var(--organik)', 'Organik', todayTotals.organik) +
+          statCard('var(--nonorganik)', 'Non-Organik', todayTotals.nonOrganik) +
+          statCard('var(--residu)', 'Residu', todayTotals.residu) +
+        '</div>';
+      if (todayGrand > 0) {
+        html += '<div style="display:flex;height:9px;border-radius:999px;overflow:hidden;border:1px solid var(--line);">' +
+          '<div style="width:' + (todayTotals.organik / todayGrand * 100) + '%;background:var(--organik);"></div>' +
+          '<div style="width:' + (todayTotals.nonOrganik / todayGrand * 100) + '%;background:var(--nonorganik);"></div>' +
+          '<div style="width:' + (todayTotals.residu / todayGrand * 100) + '%;background:var(--residu);"></div>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Total hari ini: <b style="color:var(--ink);">' + fmtKg(todayGrand) + ' kg</b></div>';
+      } else {
+        html += '<div class="empty-note">Belum ada data yang masuk hari ini.</div>';
+      }
+      html += '</div>';
+
+      var fv = state.formVals;
+      html += '<div class="card">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
+          '<div style="font-size:15px;font-weight:700;">' + (state.editingId ? 'Edit Data' : 'Tambah Data') + '</div>' +
+          (state.editingId ? '<span style="font-size:11.5px;color:var(--nonorganik);font-weight:600;">Mengedit data yang sudah ada</span>' : '') +
+        '</div>' +
+        '<div style="margin-bottom:14px;"><label>Tanggal</label><input type="date" id="f-tanggal" value="' + state.formTanggal + '" max="' + todayStr() + '" onchange="App.changeFormDate(this.value)"></div>' +
+        catInput('organik', 'Organik', 'var(--organik)', fv.organikKg, fv.organikG) +
+        catInput('non', 'Non-Organik', 'var(--nonorganik)', fv.nonKg, fv.nonG) +
+        catInput('res', 'Residu', 'var(--residu)', fv.resKg, fv.resG) +
+        '<button class="btn-primary" onclick="App.submitEntry()">' + (state.editingId ? 'Perbarui Data' : 'Simpan Data') + '</button>' +
+      '</div>';
+
+      var recent = state.entries.slice().sort(function (a, b) { return b.tanggal.localeCompare(a.tanggal); }).slice(0, 10);
+      if (recent.length > 0) {
+        html += '<div class="card"><div style="font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;">RIWAYAT TERBARU</div>' +
+          '<div class="table-wrap"><table class="report"><thead><tr><th>Tanggal</th><th>Organik</th><th>Non-Org</th><th>Residu</th><th>Total</th><th></th></tr></thead><tbody>' +
+          recent.map(function (e) {
+            var tot = e.organik + e.nonOrganik + e.residu;
+            return '<tr><td>' + formatTanggal(e.tanggal) + '</td><td>' + fmtKg(e.organik) + '</td><td>' + fmtKg(e.nonOrganik) + '</td><td>' + fmtKg(e.residu) + '</td><td style="font-weight:700;">' + fmtKg(tot) + '</td>' +
+              '<td><button class="btn-ghost" onclick="App.editEntry(\'' + e.id + '\')">Edit</button> <button class="btn-ghost" style="color:var(--residu);" onclick="App.deleteEntry(\'' + e.id + '\')">Hapus</button></td></tr>';
+          }).join('') +
+          '</tbody></table></div></div>';
+      }
+      html += '</div>'; // no-print wrap
+    }
+
+    if (state.tab === 'laporan') {
+      var list = filteredEntries();
+      var t = totalsOf(list);
+      var grand = t.organik + t.nonOrganik + t.residu;
+
+      html += '<div class="card no-print">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:12px;">Filter Laporan</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">' +
+          '<button class="btn-secondary" onclick="App.setRange(\'today\')">Hari ini</button>' +
+          '<button class="btn-secondary" onclick="App.setRange(\'7d\')">7 hari terakhir</button>' +
+          '<button class="btn-secondary" onclick="App.setRange(\'month\')">Bulan ini</button>' +
+          '<button class="btn-secondary" onclick="App.setRange(\'all\')">Semua</button>' +
+        '</div>' +
+        '<div class="row">' +
+          '<div><label>Dari tanggal</label><input type="date" value="' + state.rDari + '" max="' + state.rSampai + '" onchange="App.setDari(this.value)"></div>' +
+          '<div><label>Sampai tanggal</label><input type="date" value="' + state.rSampai + '" min="' + state.rDari + '" max="' + todayStr() + '" onchange="App.setSampai(this.value)"></div>' +
+        '</div>' +
+      '</div>';
+
+      html += '<div class="card">' +
+        '<div class="stat-grid" style="margin-bottom:16px;">' +
+          statCard('var(--organik)', 'Organik', t.organik) +
+          statCard('var(--nonorganik)', 'Non-Organik', t.nonOrganik) +
+          statCard('var(--residu)', 'Residu', t.residu) +
+          statCard('var(--ink)', 'Total', grand) +
+        '</div>' +
+        '<div class="no-print" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
+          '<button class="btn-secondary" onclick="App.exportExcel()">&#8595; Unduh Excel</button>' +
+          '<button class="btn-secondary" onclick="App.exportPDF()">&#128438; Cetak / Simpan PDF</button>' +
+        '</div>';
+
+      if (list.length === 0) {
+        html += '<div class="empty-note">Tidak ada data pada rentang tanggal ini.</div>';
+      } else {
+        html += '<div class="table-wrap"><table class="report"><thead><tr><th>Tanggal</th><th>Organik</th><th>Non-Org</th><th>Residu</th><th>Total</th></tr></thead><tbody>' +
+          list.map(function (e) {
+            var tot = e.organik + e.nonOrganik + e.residu;
+            return '<tr><td>' + formatTanggal(e.tanggal) + '</td><td>' + fmtKg(e.organik) + ' kg</td><td>' + fmtKg(e.nonOrganik) + ' kg</td><td>' + fmtKg(e.residu) + ' kg</td><td style="font-weight:700;">' + fmtKg(tot) + ' kg</td></tr>';
+          }).join('') +
+          '<tr><td style="font-weight:700;">TOTAL</td><td style="font-weight:700;">' + fmtKg(t.organik) + ' kg</td><td style="font-weight:700;">' + fmtKg(t.nonOrganik) + ' kg</td><td style="font-weight:700;">' + fmtKg(t.residu) + ' kg</td><td style="font-weight:700;">' + fmtKg(grand) + ' kg</td></tr>' +
+          '</tbody></table></div>';
+      }
+      html += '</div>';
+
+      html += '<div class="no-print" style="text-align:right;"><button class="btn-ghost" style="color:var(--residu);" onclick="App.resetAllData()">Hapus semua riwayat data di HP ini</button></div>';
+    }
+
+    app.innerHTML = html;
+  }
+
+  function statCard(color, label, val) {
+    return '<div class="stat-card" style="border-left-color:' + color + ';">' +
+      '<div style="font-size:12px;color:var(--ink-soft);font-weight:600;">' + label + '</div>' +
+      '<div class="disp" style="font-size:19px;font-weight:700;margin-top:2px;">' + fmtKg(val) + ' <span style="font-size:12px;font-weight:500;color:var(--ink-soft);">kg</span></div>' +
+    '</div>';
+  }
+
+  function catInput(prefix, label, color, kgVal, gVal) {
+    return '<div style="margin-bottom:14px;">' +
+      '<label style="color:' + color + ';">' + label + '</label>' +
+      '<div class="kg-input-group">' +
+        '<input type="number" inputmode="numeric" min="0" step="1" placeholder="0" id="f-' + prefix + '-kg" value="' + kgVal + '"><span>kg</span>' +
+        '<input type="number" inputmode="numeric" min="0" max="999" step="1" placeholder="0" id="f-' + prefix + '-g" value="' + gVal + '"><span>gram</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function setRange(kind) {
+    if (kind === 'today') { state.rDari = todayStr(); state.rSampai = todayStr(); }
+    else if (kind === '7d') { state.rDari = addDays(todayStr(), -6); state.rSampai = todayStr(); }
+    else if (kind === 'month') { state.rDari = firstOfMonth(); state.rSampai = todayStr(); }
+    else if (kind === 'all') { state.rDari = earliestDate(); state.rSampai = todayStr(); }
+    render();
+  }
+  function setDari(v) { state.rDari = v; render(); }
+  function setSampai(v) { state.rSampai = v; render(); }
+
+  // expose
+  window.App = {
+    submitIdentitas: submitIdentitas,
+    editIdentitas: editIdentitas,
+    submitEntry: submitEntry,
+    editEntry: editEntry,
+    deleteEntry: deleteEntry,
+    resetAllData: resetAllData,
+    changeFormDate: changeFormDate,
+    setTab: setTab,
+    setRange: setRange,
+    setDari: setDari,
+    setSampai: setSampai,
+    exportExcel: exportExcel,
+    exportPDF: exportPDF
+  };
+
+  loadState();
+  if (state.identitas) loadFormForDate(todayStr());
+  render();
+})();
+</script>
+</body>
+</html>
