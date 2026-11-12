@@ -595,7 +595,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
   // ---------- render: setup identitas ----------
   function renderSetupIdentitas(prefill) {
-    prefill = prefill || { nama: '', desa: '' };
+    prefill = prefill || { nama: '', desa: '', wa: '' };
     var app = document.getElementById('app');
     app.innerHTML =
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">' +
@@ -609,6 +609,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         '<div style="display:flex;flex-direction:column;gap:12px;">' +
           '<div><label>Nama Petugas</label><input id="in-nama" placeholder="Contoh: Budi Santoso" value="' + esc(prefill.nama) + '"></div>' +
           '<div><label>Nama Desa</label><input id="in-desa" placeholder="Contoh: Desa Sukamaju" value="' + esc(prefill.desa) + '"></div>' +
+          '<div><label>Nomor WhatsApp Pengawas (opsional)</label><input id="in-wa" type="tel" inputmode="tel" placeholder="Contoh: 081234567890" value="' + esc(prefill.wa || '') + '">' +
+            '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">Dipakai untuk tombol kirim laporan ke WhatsApp. Boleh dikosongkan, nanti Anda memilih penerima sendiri.</div></div>' +
           '<button class="btn-primary" onclick="App.submitIdentitas()" style="margin-top:6px;">Simpan &amp; Mulai</button>' +
         '</div>' +
       '</div>';
@@ -619,7 +621,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var desa = document.getElementById('in-desa').value.trim();
     if (!nama) { showToast('Nama petugas wajib diisi', 'error'); return; }
     if (!desa) { showToast('Nama desa wajib diisi', 'error'); return; }
-    saveIdentitas({ nama: nama, desa: desa });
+    var wa = document.getElementById('in-wa').value.trim();
+    if (wa && !normalizeWa(wa)) { showToast('Nomor WhatsApp tidak valid', 'error'); return; }
+    saveIdentitas({ nama: nama, desa: desa, wa: wa });
     showToast('Identitas tersimpan');
     render();
   }
@@ -773,9 +777,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
 
   // ---------- export ----------
-  function exportExcel() {
-    var list = filteredEntries();
-    if (list.length === 0) { showToast('Tidak ada data untuk diekspor', 'error'); return; }
+  var MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  function baseName() {
+    var idt = state.identitas;
+    return 'laporan-sampah_' + idt.nama.replace(/\s+/g, '-') + '_' + state.rDari + '_sd_' + state.rSampai;
+  }
+
+  function buildWorkbook(list) {
     var t = totalsOf(list);
     var idt = state.identitas;
     var rows = [
@@ -796,17 +805,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 14 }, { wch: 26 }, { wch: 30 }, { wch: 12 }];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Laporan Sampah');
-    XLSX.writeFile(wb, 'laporan-sampah_' + idt.nama.replace(/\s+/g, '-') + '_' + state.rDari + '_sd_' + state.rSampai + '.xlsx');
-    showToast('File Excel diunduh');
+    return wb;
   }
 
-  function exportPDF() {
-    var list = filteredEntries();
-    if (list.length === 0) { showToast('Tidak ada data untuk diekspor', 'error'); return; }
-    if (!window.jspdf) { showToast('Modul PDF gagal dimuat.', 'error'); return; }
+  function buildPdfDoc(list) {
     var t = totalsOf(list);
     var idt = state.identitas;
-
     var doc = new window.jspdf.jsPDF({ orientation: 'landscape' });
     doc.setFontSize(14);
     doc.text('Laporan Pendataan Sampah', 14, 17);
@@ -834,9 +838,152 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         }
       }
     });
+    return doc;
+  }
 
-    doc.save('laporan-sampah_' + idt.nama.replace(/\s+/g, '-') + '_' + state.rDari + '_sd_' + state.rSampai + '.pdf');
+  function exportExcel() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk diekspor', 'error'); return; }
+    XLSX.writeFile(buildWorkbook(list), baseName() + '.xlsx');
+    showToast('File Excel diunduh');
+  }
+
+  function exportPDF() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk diekspor', 'error'); return; }
+    if (!window.jspdf) { showToast('Modul PDF gagal dimuat.', 'error'); return; }
+    buildPdfDoc(list).save(baseName() + '.pdf');
     showToast('File PDF diunduh ke penyimpanan HP');
+  }
+
+  // ---------- kirim ke pengawas ----------
+  function normalizeWa(raw) {
+    var d = String(raw || '').replace(/\D/g, '');
+    if (!d) return '';
+    if (d.indexOf('0') === 0) d = '62' + d.slice(1);
+    else if (d.indexOf('8') === 0) d = '62' + d;
+    if (d.length < 9 || d.length > 15) return '';
+    return d;
+  }
+
+  function fmtShort(n) {
+    return (Math.round(n * 100) / 100).toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+
+  function groupByDate(list) {
+    var asc = list.slice().sort(function (a, b) {
+      if (a.tanggal !== b.tanggal) return a.tanggal.localeCompare(b.tanggal);
+      return (a.rw + '|' + a.rt + '|' + a.lokasi).localeCompare(b.rw + '|' + b.rt + '|' + b.lokasi);
+    });
+    var groups = [];
+    asc.forEach(function (e) {
+      var g = groups.length ? groups[groups.length - 1] : null;
+      if (!g || g.tanggal !== e.tanggal) { g = { tanggal: e.tanggal, items: [] }; groups.push(g); }
+      g.items.push(e);
+    });
+    return groups;
+  }
+
+  var MAX_WA_LEN = 1800;
+
+  function buildSummaryText(list) {
+    var idt = state.identitas;
+    var t = totalsOf(list);
+    var periode = state.rDari === state.rSampai ? formatTanggal(state.rDari) : formatTanggal(state.rDari) + ' s/d ' + formatTanggal(state.rSampai);
+    var head = '*LAPORAN SAMPAH*\nPetugas: ' + idt.nama + '\nDesa: ' + idt.desa + '\nPeriode: ' + periode + '\n';
+    var foot = '\n*TOTAL*\nOrganik: ' + fmtShort(t.organik) + ' kg\nNon-organik bisa dijual: ' + fmtShort(t.nonJual) + ' kg\nNon-organik tidak bisa dijual: ' + fmtShort(t.nonTidak) + ' kg\n*Jumlah: ' + fmtShort(grandOf(t)) + ' kg*';
+    var groups = groupByDate(list);
+
+    // versi lengkap: per lokasi
+    var full = head;
+    groups.forEach(function (g) {
+      full += '\n*' + formatTanggal(g.tanggal) + '*\n';
+      g.items.forEach(function (e) {
+        full += '- RW ' + e.rw + ' / RT ' + e.rt + (e.lokasi ? ' (' + e.lokasi + ')' : '') + ': ' +
+          fmtShort(e.organik) + ' org, ' + fmtShort(e.nonJual) + ' dijual, ' + fmtShort(e.nonTidak) + ' tdk dijual\n';
+      });
+    });
+    full += foot;
+    if (encodeURIComponent(full).length <= MAX_WA_LEN) return full;
+
+    // versi ringkas: total per tanggal
+    var compact = head + '\nRincian per lokasi terlalu panjang untuk pesan ini. Lihat file Excel/PDF.\n';
+    groups.forEach(function (g) {
+      var gt = totalsOf(g.items);
+      compact += '- ' + formatTanggal(g.tanggal) + ': ' + fmtShort(grandOf(gt)) + ' kg (' + g.items.length + ' entri)\n';
+    });
+    compact += foot;
+    if (encodeURIComponent(compact).length <= MAX_WA_LEN) return compact;
+
+    // versi paling ringkas: total saja
+    return head + '\nPeriode panjang, rincian ada di file Excel/PDF.\n' + foot;
+  }
+
+  function openLink(url) {
+    var a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function sendWhatsApp() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk dikirim', 'error'); return; }
+    var num = normalizeWa(state.identitas.wa || '');
+    var url = 'https://wa.me/' + num + '?text=' + encodeURIComponent(buildSummaryText(list));
+    openLink(url);
+  }
+
+  function fallbackDownload(file) {
+    var url = URL.createObjectURL(file);
+    var a = document.createElement('a');
+    a.href = url; a.download = file.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    showToast('HP ini belum mendukung berbagi file. File diunduh, kirim manual lewat WhatsApp.');
+  }
+
+  function shareFile(kind) {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk dibagikan', 'error'); return; }
+    var file;
+    try {
+      if (kind === 'excel') {
+        var out = XLSX.write(buildWorkbook(list), { bookType: 'xlsx', type: 'array' });
+        file = new File([out], baseName() + '.xlsx', { type: MIME_XLSX });
+      } else {
+        if (!window.jspdf) { showToast('Modul PDF gagal dimuat.', 'error'); return; }
+        file = new File([buildPdfDoc(list).output('blob')], baseName() + '.pdf', { type: 'application/pdf' });
+      }
+    } catch (err) { showToast('Gagal membuat file laporan', 'error'); return; }
+
+    var idt = state.identitas;
+    var data = { files: [file], title: 'Laporan Sampah', text: 'Laporan sampah ' + idt.nama + ' - ' + idt.desa };
+    if (navigator.share && navigator.canShare && navigator.canShare(data)) {
+      navigator.share(data).then(function () {
+        showToast('Laporan dibagikan');
+      }).catch(function (e) {
+        if (e && e.name === 'AbortError') return;
+        fallbackDownload(file);
+      });
+    } else {
+      fallbackDownload(file);
+    }
+  }
+
+  function sendBlock() {
+    var wa = state.identitas.wa || '';
+    var info = wa
+      ? 'Tujuan: ' + esc(wa) + '. Isi laporan mengikuti filter tanggal di atas.'
+      : 'Nomor pengawas belum diisi, jadi WhatsApp akan terbuka tanpa tujuan dan Anda memilih kontak atau grup sendiri. Isi nomor lewat tombol Edit di bagian atas.';
+    return '<div class="no-print" style="border-top:1px solid var(--line);padding-top:14px;margin-bottom:16px;">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;">KIRIM KE PENGAWAS</div>' +
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">' + info + '</div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+        '<button class="btn-primary" style="width:auto;" onclick="App.sendWhatsApp()">Kirim ringkasan ke WhatsApp</button>' +
+        '<button class="btn-secondary" onclick="App.shareFile(\'excel\')">Bagikan Excel</button>' +
+        '<button class="btn-secondary" onclick="App.shareFile(\'pdf\')">Bagikan PDF</button>' +
+      '</div>' +
+    '</div>';
   }
 
   // ---------- main render ----------
@@ -980,7 +1127,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         '<div class="no-print" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
           '<button class="btn-secondary" onclick="App.exportExcel()">&#8595; Unduh Excel</button>' +
           '<button class="btn-secondary" onclick="App.exportPDF()">&#8595; Unduh PDF</button>' +
-        '</div>';
+        '</div>' + sendBlock();
 
       if (list.length === 0) {
         html += '<div class="empty-note">Tidak ada data pada rentang dan filter ini.</div>';
@@ -1029,7 +1176,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     setFilterRT: setFilterRT,
     setFilterRW: setFilterRW,
     exportExcel: exportExcel,
-    exportPDF: exportPDF
+    exportPDF: exportPDF,
+    sendWhatsApp: sendWhatsApp,
+    shareFile: shareFile
   };
 
   loadState();
