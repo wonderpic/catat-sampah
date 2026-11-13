@@ -497,6 +497,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   var COLOR_ORG = 'var(--organik)';
   var COLOR_JUAL = 'var(--nonorganik)';
   var COLOR_TIDAK = '#8C6D46';
+  var COLOR_B3 = '#B54A2A';
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function todayStr() {
@@ -531,9 +532,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     });
   }
   function emptyVals() {
-    return { organikKg: '', organikG: '', njKg: '', njG: '', ntKg: '', ntG: '' };
+    return { organikKg: '', organikG: '', njKg: '', njG: '', ntKg: '', ntG: '', b3Kg: '', b3G: '' };
   }
-  function totalEntry(e) { return e.organik + e.nonJual + e.nonTidak; }
+  function totalEntry(e) { return e.organik + e.nonJual + e.nonTidak + (e.b3 || 0); }
 
   var state = {
     identitas: null,
@@ -568,10 +569,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         migrated = true;
         return {
           id: e.id, tanggal: e.tanggal, rt: e.rt, rw: e.rw, lokasi: e.lokasi || '',
-          organik: e.organik || 0, nonJual: 0, nonTidak: e.nonOrganik || 0
+          organik: e.organik || 0, nonJual: 0, nonTidak: e.nonOrganik || 0, b3: 0
         };
       }
       if (e.lokasi === undefined) { migrated = true; e.lokasi = ''; }
+      if (e.b3 === undefined) { migrated = true; e.b3 = 0; }
       return e;
     });
     if (migrated) saveEntries();
@@ -597,7 +599,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
   // ---------- render: setup identitas ----------
   function renderSetupIdentitas(prefill) {
-    prefill = prefill || { nama: '', desa: '', wa: '' };
+    prefill = prefill || { nama: '', desa: '', wa: '', email: '' };
     var app = document.getElementById('app');
     app.innerHTML =
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:22px;">' +
@@ -613,6 +615,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           '<div><label>Nama Desa</label><input id="in-desa" placeholder="Contoh: Desa Sukamaju" value="' + esc(prefill.desa) + '"></div>' +
           '<div><label>Nomor WhatsApp Pengawas (opsional)</label><input id="in-wa" type="tel" inputmode="tel" placeholder="Contoh: 081234567890" value="' + esc(prefill.wa || '') + '">' +
             '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">Dipakai untuk tombol kirim laporan ke WhatsApp. Boleh dikosongkan, nanti Anda memilih penerima sendiri.</div></div>' +
+          '<div><label>Email Pengawas (opsional)</label><input id="in-email" type="email" inputmode="email" autocapitalize="off" placeholder="Contoh: pengawas@email.com" value="' + esc(prefill.email || '') + '">' +
+            '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">Dipakai untuk tombol kirim laporan ke email. Boleh dikosongkan.</div></div>' +
           '<button class="btn-primary" onclick="App.submitIdentitas()" style="margin-top:6px;">Simpan &amp; Mulai</button>' +
         '</div>' +
       '</div>';
@@ -625,7 +629,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if (!desa) { showToast('Nama desa wajib diisi', 'error'); return; }
     var wa = document.getElementById('in-wa').value.trim();
     if (wa && !normalizeWa(wa)) { showToast('Nomor WhatsApp tidak valid', 'error'); return; }
-    saveIdentitas({ nama: nama, desa: desa, wa: wa });
+    var email = document.getElementById('in-email').value.trim();
+    if (email && !isEmail(email)) { showToast('Alamat email tidak valid', 'error'); return; }
+    saveIdentitas({ nama: nama, desa: desa, wa: wa, email: email });
     showToast('Identitas tersimpan');
     render();
   }
@@ -661,8 +667,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       existing = findEntryMatch(state.formTanggal, state.formRT, state.formRW, state.formLokasi);
     }
     if (existing) {
-      var o = splitKgGram(existing.organik), nj = splitKgGram(existing.nonJual), nt = splitKgGram(existing.nonTidak);
-      state.formVals = { organikKg: o.kg, organikG: o.g, njKg: nj.kg, njG: nj.g, ntKg: nt.kg, ntG: nt.g };
+      var o = splitKgGram(existing.organik), nj = splitKgGram(existing.nonJual), nt = splitKgGram(existing.nonTidak), b3 = splitKgGram(existing.b3 || 0);
+      state.formVals = { organikKg: o.kg, organikG: o.g, njKg: nj.kg, njG: nj.g, ntKg: nt.kg, ntG: nt.g, b3Kg: b3.kg, b3G: b3.g };
       state.editingId = existing.id;
     } else {
       state.formVals = emptyVals();
@@ -690,20 +696,21 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var organik = combineKgGram(document.getElementById('f-organik-kg').value, document.getElementById('f-organik-g').value);
     var nonJual = combineKgGram(document.getElementById('f-nj-kg').value, document.getElementById('f-nj-g').value);
     var nonTidak = combineKgGram(document.getElementById('f-nt-kg').value, document.getElementById('f-nt-g').value);
-    if (organik < 0 || nonJual < 0 || nonTidak < 0) { showToast('Jumlah tidak boleh negatif', 'error'); return; }
-    if (organik === 0 && nonJual === 0 && nonTidak === 0) { showToast('Isi minimal satu jenis sampah', 'error'); return; }
+    var b3 = combineKgGram(document.getElementById('f-b3-kg').value, document.getElementById('f-b3-g').value);
+    if (organik < 0 || nonJual < 0 || nonTidak < 0 || b3 < 0) { showToast('Jumlah tidak boleh negatif', 'error'); return; }
+    if (organik === 0 && nonJual === 0 && nonTidak === 0 && b3 === 0) { showToast('Isi minimal satu jenis sampah', 'error'); return; }
 
     var existing = findEntryMatch(tanggal, rt, rw, lokasi);
     if (existing) {
       state.entries = state.entries.map(function (e) {
-        if (e.id === existing.id) return Object.assign({}, e, { organik: organik, nonJual: nonJual, nonTidak: nonTidak });
+        if (e.id === existing.id) return Object.assign({}, e, { organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3 });
         return e;
       });
     } else {
       state.entries.push({
         id: 'e-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
         tanggal: tanggal, rt: rt, rw: rw, lokasi: lokasi,
-        organik: organik, nonJual: nonJual, nonTidak: nonTidak
+        organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3
       });
     }
     saveEntries();
@@ -757,11 +764,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   // ---------- report calc ----------
   function totalsOf(list) {
     return list.reduce(function (acc, e) {
-      acc.organik += e.organik; acc.nonJual += e.nonJual; acc.nonTidak += e.nonTidak;
+      acc.organik += e.organik; acc.nonJual += e.nonJual; acc.nonTidak += e.nonTidak; acc.b3 += (e.b3 || 0);
       return acc;
-    }, { organik: 0, nonJual: 0, nonTidak: 0 });
+    }, { organik: 0, nonJual: 0, nonTidak: 0, b3: 0 });
   }
-  function grandOf(t) { return t.organik + t.nonJual + t.nonTidak; }
+  function grandOf(t) { return t.organik + t.nonJual + t.nonTidak + t.b3; }
   function filteredEntries() {
     return state.entries
       .filter(function (e) { return e.tanggal >= state.rDari && e.tanggal <= state.rSampai; })
@@ -796,16 +803,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       ['Desa', idt.desa],
       ['Periode', formatTanggal(state.rDari) + ' s/d ' + formatTanggal(state.rSampai)],
       [],
-      ['Tanggal', 'RW', 'RT', 'Nama Lokasi Khusus', 'Organik (kg)', 'Non-Organik Bisa Dijual (kg)', 'Non-Organik Tidak Bisa Dijual (kg)', 'Total (kg)'],
+      ['Tanggal', 'RW', 'RT', 'Nama Lokasi Khusus', 'Organik (kg)', 'Non-Organik Bisa Dijual (kg)', 'Non-Organik Tidak Bisa Dijual (kg)', 'Sampah B3 (kg)', 'Total (kg)'],
     ];
     list.slice().sort(function (a, b) { return a.tanggal.localeCompare(b.tanggal); }).forEach(function (e) {
-      rows.push([formatTanggal(e.tanggal), e.rw, e.rt, e.lokasi || '-', +e.organik.toFixed(3), +e.nonJual.toFixed(3), +e.nonTidak.toFixed(3), +totalEntry(e).toFixed(3)]);
+      rows.push([formatTanggal(e.tanggal), e.rw, e.rt, e.lokasi || '-', +e.organik.toFixed(3), +e.nonJual.toFixed(3), +e.nonTidak.toFixed(3), +(e.b3 || 0).toFixed(3), +totalEntry(e).toFixed(3)]);
     });
     rows.push([]);
-    rows.push(['TOTAL KESELURUHAN', '', '', '', +t.organik.toFixed(3), +t.nonJual.toFixed(3), +t.nonTidak.toFixed(3), +grandOf(t).toFixed(3)]);
+    rows.push(['TOTAL KESELURUHAN', '', '', '', +t.organik.toFixed(3), +t.nonJual.toFixed(3), +t.nonTidak.toFixed(3), +t.b3.toFixed(3), +grandOf(t).toFixed(3)]);
 
     var ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 14 }, { wch: 26 }, { wch: 30 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 8 }, { wch: 26 }, { wch: 14 }, { wch: 26 }, { wch: 30 }, { wch: 14 }, { wch: 12 }];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Laporan Sampah');
     return wb;
@@ -832,13 +839,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     doc.setTextColor(28, 38, 33);
 
     var body = list.slice().sort(function (a, b) { return a.tanggal.localeCompare(b.tanggal); }).map(function (e) {
-      return [formatTanggal(e.tanggal), e.rw, e.rt, e.lokasi || '-', fmtKg(e.organik), fmtKg(e.nonJual), fmtKg(e.nonTidak), fmtKg(totalEntry(e))];
+      return [formatTanggal(e.tanggal), e.rw, e.rt, e.lokasi || '-', fmtKg(e.organik), fmtKg(e.nonJual), fmtKg(e.nonTidak), fmtKg(e.b3 || 0), fmtKg(totalEntry(e))];
     });
-    body.push(['TOTAL', '', '', '', fmtKg(t.organik), fmtKg(t.nonJual), fmtKg(t.nonTidak), fmtKg(grandOf(t))]);
+    body.push(['TOTAL', '', '', '', fmtKg(t.organik), fmtKg(t.nonJual), fmtKg(t.nonTidak), fmtKg(t.b3), fmtKg(grandOf(t))]);
 
     doc.autoTable({
       startY: 51,
-      head: [['Tanggal', 'RW', 'RT', 'Nama Lokasi Khusus', 'Organik (kg)', 'Non-Org Bisa Dijual (kg)', 'Non-Org Tidak Bisa Dijual (kg)', 'Total (kg)']],
+      head: [['Tanggal', 'RW', 'RT', 'Nama Lokasi Khusus', 'Organik (kg)', 'Non-Org Bisa Dijual (kg)', 'Non-Org Tidak Bisa Dijual (kg)', 'Sampah B3 (kg)', 'Total (kg)']],
       body: body,
       styles: { fontSize: 8.5, cellPadding: 2.5 },
       headStyles: { fillColor: [28, 38, 33] },
@@ -901,7 +908,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var t = totalsOf(list);
     var periode = state.rDari === state.rSampai ? formatTanggal(state.rDari) : formatTanggal(state.rDari) + ' s/d ' + formatTanggal(state.rSampai);
     var head = '*LAPORAN SAMPAH*\nPetugas: ' + idt.nama + '\nDesa: ' + idt.desa + '\nPeriode: ' + periode + '\n';
-    var foot = '\n*TOTAL*\nOrganik: ' + fmtShort(t.organik) + ' kg\nNon-organik bisa dijual: ' + fmtShort(t.nonJual) + ' kg\nNon-organik tidak bisa dijual: ' + fmtShort(t.nonTidak) + ' kg\n*Jumlah: ' + fmtShort(grandOf(t)) + ' kg*';
+    var foot = '\n*TOTAL*\nOrganik: ' + fmtShort(t.organik) + ' kg\nNon-organik bisa dijual: ' + fmtShort(t.nonJual) + ' kg\nNon-organik tidak bisa dijual: ' + fmtShort(t.nonTidak) + ' kg\nSampah B3: ' + fmtShort(t.b3) + ' kg\n*Jumlah: ' + fmtShort(grandOf(t)) + ' kg*';
     var groups = groupByDate(list);
 
     // versi lengkap: per lokasi
@@ -910,7 +917,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       full += '\n*' + formatTanggal(g.tanggal) + '*\n';
       g.items.forEach(function (e) {
         full += '- RW ' + e.rw + ' / RT ' + e.rt + (e.lokasi ? ' (' + e.lokasi + ')' : '') + ': ' +
-          fmtShort(e.organik) + ' org, ' + fmtShort(e.nonJual) + ' dijual, ' + fmtShort(e.nonTidak) + ' tdk dijual\n';
+          fmtShort(e.organik) + ' org, ' + fmtShort(e.nonJual) + ' dijual, ' + fmtShort(e.nonTidak) + ' tdk dijual' + ((e.b3 || 0) > 0 ? ', ' + fmtShort(e.b3) + ' B3' : '') + '\n';
       });
     });
     full += foot;
@@ -941,6 +948,22 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var num = normalizeWa(state.identitas.wa || '');
     var url = 'https://wa.me/' + num + '?text=' + encodeURIComponent(buildSummaryText(list));
     openLink(url);
+  }
+
+  function isEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim()); }
+
+  function sendEmail() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data untuk dikirim', 'error'); return; }
+    var idt = state.identitas;
+    var periode = state.rDari === state.rSampai ? formatTanggal(state.rDari) : formatTanggal(state.rDari) + ' s/d ' + formatTanggal(state.rSampai);
+    var subject = 'Laporan Sampah - ' + idt.nama + ' - ' + periode;
+    var body = buildSummaryText(list).replace(/\*/g, '').replace(/\n/g, '\r\n');
+    var to = isEmail(idt.email) ? idt.email.trim() : '';
+    var url = 'mailto:' + to + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+    var a = document.createElement('a');
+    a.href = url;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
 
   function fallbackDownload(file) {
@@ -981,15 +1004,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
 
   function sendBlock() {
-    var wa = state.identitas.wa || '';
-    var info = wa
-      ? 'Tujuan: ' + esc(wa) + '. Isi laporan mengikuti filter tanggal di atas.'
-      : 'Nomor pengawas belum diisi, jadi WhatsApp akan terbuka tanpa tujuan dan Anda memilih kontak atau grup sendiri. Isi nomor lewat tombol Edit di bagian atas.';
+    var idt = state.identitas;
+    var wa = idt.wa || '', em = idt.email || '';
+    var info = (wa
+      ? 'WhatsApp ke ' + esc(wa) + '.'
+      : 'Nomor pengawas belum diisi, jadi WhatsApp terbuka tanpa tujuan dan Anda memilih kontak atau grup sendiri.') + ' ' +
+      (em
+      ? 'Email ke ' + esc(em) + '.'
+      : 'Email pengawas belum diisi, jadi Anda mengetik alamat tujuan sendiri.') +
+      ' Isi laporan mengikuti filter tanggal di atas. Nomor dan email bisa diubah lewat tombol Edit di bagian atas.';
     return '<div class="no-print" style="border-top:1px solid var(--line);padding-top:14px;margin-bottom:16px;">' +
       '<div style="font-size:13px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;">KIRIM KE PENGAWAS</div>' +
       '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">' + info + '</div>' +
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<button class="btn-primary" style="width:auto;" onclick="App.sendWhatsApp()">Kirim ke WhatsApp</button>' +
+        '<button class="btn-primary" style="width:auto;" onclick="App.sendEmail()">Kirim ke Email</button>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">Pesan WhatsApp dan email hanya berisi ringkasan teks, tanpa lampiran. Untuk mengirim file, gunakan tombol di bawah lalu pilih WhatsApp, Gmail, atau aplikasi email Anda.</div>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
-        '<button class="btn-primary" style="width:auto;" onclick="App.sendWhatsApp()">Kirim ringkasan ke WhatsApp</button>' +
         '<button class="btn-secondary" onclick="App.shareFile(\'excel\')">Bagikan Excel</button>' +
         '<button class="btn-secondary" onclick="App.shareFile(\'pdf\')">Bagikan PDF</button>' +
       '</div>' +
@@ -1019,16 +1051,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       statCard(COLOR_ORG, 'Organik', t.organik) +
       statCard(COLOR_JUAL, 'Non-Organik Bisa Dijual', t.nonJual) +
       statCard(COLOR_TIDAK, 'Non-Organik Tidak Bisa Dijual', t.nonTidak) +
+      statCard(COLOR_B3, 'Sampah B3', t.b3) +
       statCard('var(--ink)', 'Total', grandOf(t)) +
     '</div>';
   }
 
-  var TH = '<th>Tanggal</th><th>RW</th><th>RT</th><th>Lokasi Khusus</th><th>Organik</th><th>Non-Org Bisa Dijual</th><th>Non-Org Tidak Bisa Dijual</th><th>Total</th>';
+  var TH = '<th>Tanggal</th><th>RW</th><th>RT</th><th>Lokasi Khusus</th><th>Organik</th><th>Non-Org Bisa Dijual</th><th>Non-Org Tidak Bisa Dijual</th><th>Sampah B3</th><th>Total</th>';
 
   function rowCells(e, withKg) {
     var u = withKg ? ' kg' : '';
     return '<td>' + formatTanggal(e.tanggal) + '</td><td>' + esc(e.rw) + '</td><td>' + esc(e.rt) + '</td><td>' + (e.lokasi ? esc(e.lokasi) : '-') + '</td>' +
-      '<td>' + fmtKg(e.organik) + u + '</td><td>' + fmtKg(e.nonJual) + u + '</td><td>' + fmtKg(e.nonTidak) + u + '</td>' +
+      '<td>' + fmtKg(e.organik) + u + '</td><td>' + fmtKg(e.nonJual) + u + '</td><td>' + fmtKg(e.nonTidak) + u + '</td><td>' + fmtKg(e.b3 || 0) + u + '</td>' +
       '<td style="font-weight:700;">' + fmtKg(totalEntry(e)) + u + '</td>';
   }
 
@@ -1069,6 +1102,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           '<div style="width:' + (todayTotals.organik / todayGrand * 100) + '%;background:' + COLOR_ORG + ';"></div>' +
           '<div style="width:' + (todayTotals.nonJual / todayGrand * 100) + '%;background:' + COLOR_JUAL + ';"></div>' +
           '<div style="width:' + (todayTotals.nonTidak / todayGrand * 100) + '%;background:' + COLOR_TIDAK + ';"></div>' +
+          '<div style="width:' + (todayTotals.b3 / todayGrand * 100) + '%;background:' + COLOR_B3 + ';"></div>' +
         '</div>' +
         '<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">Total hari ini: <b style="color:var(--ink);">' + fmtKg(todayGrand) + ' kg</b> dari ' + todayEntries.length + ' entri</div>';
       } else {
@@ -1094,6 +1128,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         catInput('organik', 'Organik', COLOR_ORG, fv.organikKg, fv.organikG) +
         catInput('nj', 'Non-Organik Bisa Dijual', COLOR_JUAL, fv.njKg, fv.njG) +
         catInput('nt', 'Non-Organik Tidak Bisa Dijual', COLOR_TIDAK, fv.ntKg, fv.ntG) +
+        catInput('b3', 'Sampah B3', COLOR_B3, fv.b3Kg, fv.b3G) +
         '<button class="btn-primary" onclick="App.submitEntry()">' + (state.editingId ? 'Perbarui Data' : 'Simpan Data') + '</button>' +
       '</div>';
 
@@ -1148,6 +1183,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             '<td style="font-weight:700;">' + fmtKg(t.organik) + ' kg</td>' +
             '<td style="font-weight:700;">' + fmtKg(t.nonJual) + ' kg</td>' +
             '<td style="font-weight:700;">' + fmtKg(t.nonTidak) + ' kg</td>' +
+            '<td style="font-weight:700;">' + fmtKg(t.b3) + ' kg</td>' +
             '<td style="font-weight:700;">' + fmtKg(grandOf(t)) + ' kg</td></tr>' +
           '</tbody></table></div>';
       }
@@ -1188,6 +1224,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     exportExcel: exportExcel,
     exportPDF: exportPDF,
     sendWhatsApp: sendWhatsApp,
+    sendEmail: sendEmail,
     shareFile: shareFile
   };
 
