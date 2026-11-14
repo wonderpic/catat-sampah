@@ -53,6 +53,11 @@
   .kg-input-group { display: flex; gap: 8px; align-items: center; }
   .kg-input-group input { text-align: right; }
   .kg-input-group span { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+  .banner { border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; line-height: 1.45; display: flex; gap: 12px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+  .banner-warn { background: #FFF4DB; border: 1px solid #E8C873; color: #5C4510; }
+  .banner-crit { background: #FBE7E1; border: 1px solid #E3A592; color: #7A2B14; }
+  .banner-info { background: #E4EEF3; border: 1px solid #A9C6D6; color: #1F4A61; }
+  .banner-actions { display: flex; gap: 8px; align-items: center; }
   .print-only { display: none; }
   .empty-note { font-size: 13.5px; color: var(--ink-soft); }
   @media print {
@@ -498,6 +503,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   var COLOR_JUAL = 'var(--nonorganik)';
   var COLOR_TIDAK = '#8C6D46';
   var COLOR_B3 = '#B54A2A';
+  var LS_PENDING = 'catatan_sampah_pending';
+  var WARN_KG = 500, BLOCK_KG = 5000;      // batas wajar jumlah per jenis dalam satu entri
+  var ENTRY_WARN = 2000, ENTRY_CRIT = 5000; // batas jumlah entri di satu HP
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function todayStr() {
@@ -549,7 +557,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     rDari: todayStr(),
     rSampai: todayStr(),
     fRT: '',
-    fRW: ''
+    fRW: '',
+    pendingIds: [],
+    pendingChannel: ''
   };
 
   function loadState() {
@@ -577,6 +587,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return e;
     });
     if (migrated) saveEntries();
+
+    try {
+      var pRaw = localStorage.getItem(LS_PENDING);
+      var p = pRaw ? JSON.parse(pRaw) : null;
+      if (p && Array.isArray(p.ids)) {
+        var have = {};
+        state.entries.forEach(function (e) { have[e.id] = true; });
+        state.pendingIds = p.ids.filter(function (id) { return have[id]; });
+        state.pendingChannel = String(p.channel || '');
+      }
+    } catch (e) { state.pendingIds = []; }
   }
   function saveIdentitas(obj) {
     state.identitas = obj;
@@ -585,7 +606,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   }
   function saveEntries() {
     try { localStorage.setItem(LS_ENTRIES, JSON.stringify(state.entries)); }
-    catch (e) { showToast('Gagal menyimpan data di HP ini. Coba lagi.', 'error'); }
+    catch (e) { showToast('Gagal menyimpan: penyimpanan HP penuh atau diblokir. Unduh cadangan lalu bersihkan data lama.', 'error'); }
+  }
+  function savePending() {
+    try { localStorage.setItem(LS_PENDING, JSON.stringify({ ids: state.pendingIds, channel: state.pendingChannel })); } catch (e) {}
   }
 
   var toastTimer = null;
@@ -619,6 +643,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             '<div style="font-size:11.5px;color:var(--ink-soft);margin-top:5px;">Dipakai untuk tombol kirim laporan ke email. Boleh dikosongkan.</div></div>' +
           '<button class="btn-primary" onclick="App.submitIdentitas()" style="margin-top:6px;">Simpan &amp; Mulai</button>' +
         '</div>' +
+        '<div style="margin-top:16px;font-size:12px;color:var(--ink-soft);">Pindah HP atau data hilang? <button class="btn-ghost" onclick="App.pickRestore()">Pulihkan dari file cadangan</button></div>' +
+        '<input type="file" id="f-restore" accept=".json,application/json" style="display:none" onchange="App.restoreFile(this)">' +
       '</div>';
   }
 
@@ -697,20 +723,29 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var nonJual = combineKgGram(document.getElementById('f-nj-kg').value, document.getElementById('f-nj-g').value);
     var nonTidak = combineKgGram(document.getElementById('f-nt-kg').value, document.getElementById('f-nt-g').value);
     var b3 = combineKgGram(document.getElementById('f-b3-kg').value, document.getElementById('f-b3-g').value);
+    var gramIds = ['f-organik-g', 'f-nj-g', 'f-nt-g', 'f-b3-g'];
+    for (var gi = 0; gi < gramIds.length; gi++) {
+      if ((parseFloat(document.getElementById(gramIds[gi]).value) || 0) > 999) {
+        showToast('Isian gram harus 0 sampai 999. Kelebihannya masukkan ke kolom kg.', 'error'); return;
+      }
+    }
     if (organik < 0 || nonJual < 0 || nonTidak < 0 || b3 < 0) { showToast('Jumlah tidak boleh negatif', 'error'); return; }
     if (organik === 0 && nonJual === 0 && nonTidak === 0 && b3 === 0) { showToast('Isi minimal satu jenis sampah', 'error'); return; }
+    var biggest = Math.max(organik, nonJual, nonTidak, b3);
+    if (biggest > BLOCK_KG) { showToast('Jumlah ' + fmtKg(biggest) + ' kg terlalu besar untuk satu entri. Periksa kembali.', 'error'); return; }
+    if (biggest > WARN_KG && !confirm('Ada jumlah ' + fmtKg(biggest) + ' kg dalam satu entri, tidak biasa besar. Pastikan tidak salah ketik. Tetap simpan?')) return;
 
     var existing = findEntryMatch(tanggal, rt, rw, lokasi);
     if (existing) {
       state.entries = state.entries.map(function (e) {
-        if (e.id === existing.id) return Object.assign({}, e, { organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3 });
+        if (e.id === existing.id) return Object.assign({}, e, { organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3, reportedAt: null });
         return e;
       });
     } else {
       state.entries.push({
         id: 'e-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
         tanggal: tanggal, rt: rt, rw: rw, lokasi: lokasi,
-        organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3
+        organik: organik, nonJual: nonJual, nonTidak: nonTidak, b3: b3, reportedAt: null
       });
     }
     saveEntries();
@@ -948,6 +983,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var num = normalizeWa(state.identitas.wa || '');
     var url = 'https://wa.me/' + num + '?text=' + encodeURIComponent(buildSummaryText(list));
     openLink(url);
+    beginReport(list, 'WhatsApp');
   }
 
   function isEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim()); }
@@ -964,6 +1000,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     var a = document.createElement('a');
     a.href = url;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    beginReport(list, 'Email');
   }
 
   function fallbackDownload(file) {
@@ -994,13 +1031,188 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if (navigator.share && navigator.canShare && navigator.canShare(data)) {
       navigator.share(data).then(function () {
         showToast('Laporan dibagikan');
+        beginReport(list, chanOf(kind));
       }).catch(function (e) {
         if (e && e.name === 'AbortError') return;
         fallbackDownload(file);
+        beginReport(list, chanOf(kind));
       });
     } else {
       fallbackDownload(file);
+      beginReport(list, chanOf(kind));
     }
+  }
+
+  // ---------- status pelaporan ----------
+  function chanOf(kind) { return 'file ' + (kind === 'excel' ? 'Excel' : 'PDF'); }
+  function unreported() { return state.entries.filter(function (e) { return !e.reportedAt; }); }
+  function daysBetween(a, b) {
+    var pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+    return Math.round((new Date(pb[0], pb[1] - 1, pb[2]) - new Date(pa[0], pa[1] - 1, pa[2])) / 86400000);
+  }
+  function beginReport(list, channel) {
+    state.pendingIds = list.map(function (e) { return e.id; });
+    state.pendingChannel = channel;
+    savePending();
+    render();
+  }
+  function confirmReport() {
+    var ids = {};
+    state.pendingIds.forEach(function (id) { ids[id] = true; });
+    var now = new Date().toISOString();
+    state.entries = state.entries.map(function (e) { return ids[e.id] ? Object.assign({}, e, { reportedAt: now }) : e; });
+    saveEntries();
+    var cnt = state.pendingIds.length;
+    state.pendingIds = []; state.pendingChannel = ''; savePending();
+    showToast(cnt + ' entri ditandai sudah dilaporkan');
+    render();
+  }
+  function cancelReport() {
+    state.pendingIds = []; state.pendingChannel = ''; savePending();
+    render();
+  }
+  function unmarkPeriod() {
+    var list = filteredEntries();
+    if (list.length === 0) { showToast('Tidak ada data pada periode ini', 'error'); return; }
+    if (!confirm('Tandai ' + list.length + ' entri pada periode ini sebagai BELUM dilaporkan?')) return;
+    var ids = {};
+    list.forEach(function (e) { ids[e.id] = true; });
+    state.entries = state.entries.map(function (e) { return ids[e.id] ? Object.assign({}, e, { reportedAt: null }) : e; });
+    saveEntries();
+    showToast('Ditandai belum dilaporkan');
+    render();
+  }
+  function reportNow() {
+    var un = unreported();
+    if (un.length === 0) return;
+    var oldest = un.reduce(function (m, e) { return e.tanggal < m ? e.tanggal : m; }, un[0].tanggal);
+    state.rDari = oldest; state.rSampai = todayStr();
+    state.fRT = ''; state.fRW = '';
+    state.tab = 'laporan';
+    render();
+    try { window.scrollTo(0, 0); } catch (e) {}
+  }
+
+  function warnBanners() {
+    var h = '';
+    if (state.pendingIds.length) {
+      h += '<div class="no-print banner banner-info"><div><b>Laporan sudah terkirim?</b> ' + state.pendingIds.length +
+        ' entri dikirim lewat ' + esc(state.pendingChannel) + '. Tandai hanya kalau pesan atau file benar-benar sudah terkirim.</div>' +
+        '<div class="banner-actions"><button class="btn-secondary" onclick="App.confirmReport()">Ya, sudah terkirim</button>' +
+        '<button class="btn-ghost" onclick="App.cancelReport()">Belum</button></div></div>';
+    }
+    var un = unreported();
+    if (un.length) {
+      var oldest = un.reduce(function (m, e) { return e.tanggal < m ? e.tanggal : m; }, un[0].tanggal);
+      var days = daysBetween(oldest, todayStr());
+      h += '<div class="no-print banner ' + (days >= 1 ? 'banner-crit' : 'banner-warn') + '"><div><b>' + un.length +
+        ' entri belum dilaporkan ke pengawas.</b> Catatan terlama: ' + formatTanggal(oldest) +
+        (days >= 1 ? ' (' + days + ' hari lalu).' : ' (hari ini).') + '</div>' +
+        '<div class="banner-actions"><button class="btn-secondary" onclick="App.reportNow()">Laporkan sekarang</button></div></div>';
+    }
+    var cnt = state.entries.length;
+    if (cnt >= ENTRY_WARN) {
+      h += '<div class="no-print banner ' + (cnt >= ENTRY_CRIT ? 'banner-crit' : 'banner-warn') + '"><div><b>Catatan di HP ini sudah ' +
+        (cnt >= ENTRY_CRIT ? 'sangat ' : '') + 'banyak (' + cnt + ' entri).</b> ' +
+        (cnt >= ENTRY_CRIT ? 'Ada risiko gagal menyimpan. Cadangkan sekarang lalu bersihkan data lama.' : 'Laporan akan makin lambat. Unduh cadangan dan bersihkan data lama.') + '</div>' +
+        '<div class="banner-actions"><button class="btn-secondary" onclick="App.setTab(\'laporan\')">Buka Cadangan</button></div></div>';
+    }
+    return h;
+  }
+
+  // ---------- cadangan & pemulihan ----------
+  function cleanStr(v) { return String(v == null ? '' : v).trim().slice(0, 120); }
+  function numOk(v) { var x = Number(v); return (isFinite(x) && x >= 0 && x <= 100000) ? x : NaN; }
+  function keyOf(e) {
+    return e.tanggal + '|' + String(e.rt).trim().toLowerCase() + '|' + String(e.rw).trim().toLowerCase() + '|' + String(e.lokasi || '').trim().toLowerCase();
+  }
+  function sanitizeEntry(r) {
+    if (!r || typeof r !== 'object') return null;
+    var tg = String(r.tanggal || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tg)) return null;
+    var rt = cleanStr(r.rt), rw = cleanStr(r.rw);
+    if (!rt || !rw) return null;
+    var oj = r.nonJual, ot = r.nonTidak;
+    if (oj === undefined && ot === undefined) { oj = 0; ot = r.nonOrganik || 0; }
+    var vals = [r.organik, oj, ot, r.b3 === undefined ? 0 : r.b3].map(numOk);
+    for (var k = 0; k < vals.length; k++) { if (isNaN(vals[k])) return null; }
+    return {
+      id: cleanStr(r.id) || ('e-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
+      tanggal: tg, rt: rt, rw: rw, lokasi: cleanStr(r.lokasi),
+      organik: vals[0], nonJual: vals[1], nonTidak: vals[2], b3: vals[3],
+      reportedAt: (typeof r.reportedAt === 'string' && r.reportedAt) ? r.reportedAt.slice(0, 40) : null
+    };
+  }
+
+  function backupData() {
+    var data = { app: 'catatan-sampah-desa-karyamekar', versi: 1, dibuat: new Date().toISOString(), identitas: state.identitas, entries: state.entries };
+    var file = new File([JSON.stringify(data)], 'cadangan-catatan-sampah_' + todayStr() + '.json', { type: 'application/json' });
+    var url = URL.createObjectURL(file);
+    var a = document.createElement('a');
+    a.href = url; a.download = file.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    showToast('Cadangan diunduh (' + state.entries.length + ' entri)');
+  }
+
+  function pickRestore() {
+    var el = document.getElementById('f-restore');
+    if (el) el.click();
+  }
+
+  function restoreFile(input) {
+    var f = input.files && input.files[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) { showToast('File terlalu besar untuk berkas cadangan', 'error'); input.value = ''; return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data;
+      try { data = JSON.parse(String(reader.result)); }
+      catch (e) { showToast('File bukan cadangan yang valid', 'error'); input.value = ''; return; }
+      var list = Array.isArray(data) ? data : (data && Array.isArray(data.entries) ? data.entries : null);
+      if (!list) { showToast('Isi file tidak dikenali sebagai cadangan catatan sampah', 'error'); input.value = ''; return; }
+
+      var valid = [], bad = 0;
+      list.forEach(function (r) { var e = sanitizeEntry(r); if (e) valid.push(e); else bad++; });
+      var haveId = {}, haveKey = {};
+      state.entries.forEach(function (e) { haveId[e.id] = true; haveKey[keyOf(e)] = true; });
+      var toAdd = [], skip = 0;
+      valid.forEach(function (e) {
+        if (haveId[e.id] || haveKey[keyOf(e)]) { skip++; return; }
+        haveId[e.id] = true; haveKey[keyOf(e)] = true; toAdd.push(e);
+      });
+
+      var restoreId = (!state.identitas && data && data.identitas && cleanStr(data.identitas.nama) && cleanStr(data.identitas.desa)) ? data.identitas : null;
+      if (toAdd.length === 0 && !restoreId) {
+        showToast('Tidak ada entri baru. ' + skip + ' sudah ada' + (bad ? ', ' + bad + ' tidak valid' : '') + '.', 'error');
+        input.value = ''; return;
+      }
+      if (!confirm('Tambahkan ' + toAdd.length + ' entri dari cadangan ke HP ini? ' + skip + ' entri yang sudah ada dilewati' + (bad ? ', ' + bad + ' tidak valid' : '') + '. Data yang sudah ada tidak ditimpa.')) { input.value = ''; return; }
+
+      if (restoreId) {
+        saveIdentitas({ nama: cleanStr(restoreId.nama), desa: cleanStr(restoreId.desa), wa: cleanStr(restoreId.wa), email: cleanStr(restoreId.email) });
+      }
+      state.entries = state.entries.concat(toAdd);
+      saveEntries();
+      input.value = '';
+      showToast(toAdd.length + ' entri dipulihkan, ' + skip + ' dilewati');
+      render();
+    };
+    reader.onerror = function () { showToast('File tidak bisa dibaca', 'error'); input.value = ''; };
+    reader.readAsText(f);
+  }
+
+  function cleanOld() {
+    var cutoff = addDays(todayStr(), -90);
+    var old = state.entries.filter(function (e) { return e.reportedAt && e.tanggal < cutoff; });
+    if (old.length === 0) { showToast('Tidak ada data lama yang sudah dilaporkan untuk dibersihkan'); return; }
+    if (!confirm('Hapus ' + old.length + ' entri yang sudah dilaporkan dan lebih lama dari 90 hari? Pastikan Anda sudah mengunduh cadangan.')) return;
+    var drop = {};
+    old.forEach(function (e) { drop[e.id] = true; });
+    state.entries = state.entries.filter(function (e) { return !drop[e.id]; });
+    saveEntries();
+    showToast(old.length + ' entri lama dibersihkan');
+    render();
   }
 
   function sendBlock() {
@@ -1025,6 +1237,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         '<button class="btn-secondary" onclick="App.shareFile(\'excel\')">Bagikan Excel</button>' +
         '<button class="btn-secondary" onclick="App.shareFile(\'pdf\')">Bagikan PDF</button>' +
       '</div>' +
+      '<div style="margin-top:10px;"><button class="btn-ghost" onclick="App.unmarkPeriod()">Tandai periode ini belum dilaporkan</button></div>' +
     '</div>';
   }
 
@@ -1056,13 +1269,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     '</div>';
   }
 
-  var TH = '<th>Tanggal</th><th>RW</th><th>RT</th><th>Lokasi Khusus</th><th>Organik</th><th>Non-Org Bisa Dijual</th><th>Non-Org Tidak Bisa Dijual</th><th>Sampah B3</th><th>Total</th>';
+  var TH = '<th>Tanggal</th><th>RW</th><th>RT</th><th>Lokasi Khusus</th><th>Organik</th><th>Non-Org Bisa Dijual</th><th>Non-Org Tidak Bisa Dijual</th><th>Sampah B3</th><th>Total</th><th>Status</th>';
 
   function rowCells(e, withKg) {
     var u = withKg ? ' kg' : '';
     return '<td>' + formatTanggal(e.tanggal) + '</td><td>' + esc(e.rw) + '</td><td>' + esc(e.rt) + '</td><td>' + (e.lokasi ? esc(e.lokasi) : '-') + '</td>' +
       '<td>' + fmtKg(e.organik) + u + '</td><td>' + fmtKg(e.nonJual) + u + '</td><td>' + fmtKg(e.nonTidak) + u + '</td><td>' + fmtKg(e.b3 || 0) + u + '</td>' +
-      '<td style="font-weight:700;">' + fmtKg(totalEntry(e)) + u + '</td>';
+      '<td style="font-weight:700;">' + fmtKg(totalEntry(e)) + u + '</td>' +
+      '<td>' + (e.reportedAt ? '<span style="color:var(--organik);font-weight:600;">Dilaporkan</span>' : '<span style="color:#B7791F;font-weight:600;">Belum</span>') + '</td>';
   }
 
   function render() {
@@ -1086,6 +1300,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     '</div>';
     html += '<div class="no-print" style="font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;">' + formatTanggalPanjang(todayStr()) + '</div>';
     html += '<div class="no-print" style="font-size:11px;color:var(--ink-soft);margin-bottom:18px;">Data tersimpan hanya di HP ini. Gunakan menu Laporan untuk mengekspor dan mengirim data ke pusat.</div>';
+    html += warnBanners();
 
     html += '<div class="tabs no-print">' +
       '<button class="tab-btn ' + (state.tab === 'input' ? 'active' : '') + '" onclick="App.setTab(\'input\')">Input Data</button>' +
@@ -1184,11 +1399,20 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             '<td style="font-weight:700;">' + fmtKg(t.nonJual) + ' kg</td>' +
             '<td style="font-weight:700;">' + fmtKg(t.nonTidak) + ' kg</td>' +
             '<td style="font-weight:700;">' + fmtKg(t.b3) + ' kg</td>' +
-            '<td style="font-weight:700;">' + fmtKg(grandOf(t)) + ' kg</td></tr>' +
+            '<td style="font-weight:700;">' + fmtKg(grandOf(t)) + ' kg</td><td></td></tr>' +
           '</tbody></table></div>';
       }
       html += '</div>';
 
+      html += '<div class="card no-print"><div style="font-size:15px;font-weight:700;margin-bottom:6px;">Cadangan Data</div>' +
+        '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:10px;">Simpan seluruh catatan di HP ini ke satu file, atau pulihkan dari file cadangan. Pemulihan hanya menambahkan entri yang belum ada dan tidak menimpa catatan yang sudah ada. "Bersihkan data lama" hanya menghapus entri yang sudah dilaporkan dan lebih lama dari 90 hari.</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+          '<button class="btn-secondary" onclick="App.backupData()">Unduh cadangan</button>' +
+          '<button class="btn-secondary" onclick="App.pickRestore()">Pulihkan dari cadangan</button>' +
+          '<button class="btn-secondary" onclick="App.cleanOld()">Bersihkan data lama</button>' +
+        '</div>' +
+        '<input type="file" id="f-restore" accept=".json,application/json" style="display:none" onchange="App.restoreFile(this)">' +
+      '</div>';
       html += '<div class="no-print" style="text-align:right;"><button class="btn-ghost" style="color:#B54A2A;" onclick="App.resetAllData()">Hapus semua riwayat data di HP ini</button></div>';
     }
 
@@ -1225,7 +1449,15 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     exportPDF: exportPDF,
     sendWhatsApp: sendWhatsApp,
     sendEmail: sendEmail,
-    shareFile: shareFile
+    shareFile: shareFile,
+    confirmReport: confirmReport,
+    cancelReport: cancelReport,
+    unmarkPeriod: unmarkPeriod,
+    reportNow: reportNow,
+    backupData: backupData,
+    pickRestore: pickRestore,
+    restoreFile: restoreFile,
+    cleanOld: cleanOld
   };
 
   loadState();
